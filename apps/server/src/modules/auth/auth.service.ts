@@ -1,14 +1,14 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { IGitHubProfile } from '@sos-academy/shared';
 import * as bcrypt from 'bcryptjs';
 import { Model } from 'mongoose';
+import { envConfig } from '../../common/config/env.config';
 import { User, UserDocument } from '../user/schemas/user.schema';
 import { UserService } from '../user/user.service';
 import { Session, SessionDocument } from './schemas/session.schema';
-import { envConfig } from '../../common/config/env.config';
 
 @Injectable()
 export class AuthService {
@@ -37,7 +37,7 @@ export class AuthService {
     const accessToken = this.jwtService.sign(payload);
     const refreshToken = this.jwtService.sign(payload, {
       secret: envConfig.jwt.refreshSecret,
-      expiresIn: envConfig.jwt.refreshExpiration,
+      expiresIn: envConfig.jwt.refreshExpiration as JwtSignOptions['expiresIn'],
     });
 
     await this.createSession(user._id.toString(), refreshToken);
@@ -78,7 +78,7 @@ export class AuthService {
       const newAccessToken = this.jwtService.sign(newPayload);
       const newRefreshToken = this.jwtService.sign(newPayload, {
         secret: envConfig.jwt.refreshSecret,
-        expiresIn: envConfig.jwt.refreshExpiration,
+        expiresIn: envConfig.jwt.refreshExpiration as JwtSignOptions['expiresIn'],
       });
 
       return {
