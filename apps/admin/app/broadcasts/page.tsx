@@ -3,8 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { formatDateTime } from '@sos-academy/shared';
 import { apiClient } from '../../lib/api-client';
-import { isAuthenticated } from '../../lib/auth';
+import { DURATIONS } from '../../lib/constants';
+import { useRequireAuth } from '../../context/AuthContext';
+import MarkdownEditor, { markdownToHtml } from '../components/MarkdownEditor';
 import Sidebar from '../components/Sidebar';
 
 export const dynamic = 'force-dynamic';
@@ -16,19 +19,13 @@ interface Community {
 }
 
 interface User {
-  _id: string;
+  _id: string | { toString: () => string } | unknown;
   id?: string;
   name: string;
   email: string;
 }
 
 type RecipientType = 'ALL_USERS' | 'COMMUNITY' | 'MENTORS' | 'INACTIVE_USERS' | 'SPECIFIC_USERS';
-
-const DURATIONS = [
-  { value: 15, label: '15 min' },
-  { value: 30, label: '30 min' },
-  { value: 60, label: '1 hour' },
-];
 
 interface Broadcast {
   _id: string;
@@ -50,13 +47,18 @@ interface Broadcast {
   eventDuration?: string;
   eventMeetingLink?: string;
   eventDescription?: string;
+  failedRecipients?: { email: string; name?: string; reason?: string }[];
+  failedCount?: number;
 }
 
 export default function BroadcastsPage() {
+  useRequireAuth();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [retriggering, setRetriggering] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const [expandedFailures, setExpandedFailures] = useState<Set<string>>(new Set());
   const [communities, setCommunities] = useState<Community[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
@@ -84,11 +86,6 @@ export default function BroadcastsPage() {
 
   useEffect(() => {
     if (!mounted) return;
-
-    if (!isAuthenticated()) {
-      router.replace('/login');
-      return;
-    }
 
     fetchCommunities();
     fetchBroadcasts();
@@ -159,9 +156,12 @@ export default function BroadcastsPage() {
     setLoading(true);
 
     try {
+      // Convert markdown to HTML before sending
+      const htmlMessage = markdownToHtml(message);
+
       const payload: any = {
         subject,
-        message,
+        message: htmlMessage,
         recipientType,
       };
 
@@ -173,7 +173,8 @@ export default function BroadcastsPage() {
       }
 
       if (recipientType === 'SPECIFIC_USERS' && selectedUserIds.length > 0) {
-        payload.userIds = selectedUserIds;
+        // Ensure all IDs are strings
+        payload.userIds = selectedUserIds.map((id) => String(id));
       }
 
       if (recipientType === 'INACTIVE_USERS') {
@@ -240,9 +241,23 @@ export default function BroadcastsPage() {
     setScheduledAt('');
   };
 
-  const toggleUserSelection = (userId: string) => {
+  const getUserId = (user: User): string => {
+    if (typeof user._id === 'string') return user._id;
+    if (typeof user.id === 'string') return user.id;
+    if (user._id && typeof user._id === 'object' && user._id !== null && 'toString' in user._id) {
+      return (user._id as { toString: () => string }).toString();
+    }
+    if (user._id) {
+      return String(user._id);
+    }
+    return '';
+  };
+
+  const toggleUserSelection = (userId: string | unknown) => {
+    // Ensure userId is a string
+    const idString = typeof userId === 'string' ? userId : String(userId);
     setSelectedUserIds((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+      prev.includes(idString) ? prev.filter((id) => id !== idString) : [...prev, idString]
     );
   };
 
@@ -320,9 +335,12 @@ export default function BroadcastsPage() {
     setLoading(true);
 
     try {
+      // Convert markdown to HTML before sending
+      const htmlMessage = markdownToHtml(message);
+
       const payload: any = {
         subject,
-        message,
+        message: htmlMessage,
         recipientType,
       };
 
@@ -334,7 +352,8 @@ export default function BroadcastsPage() {
       }
 
       if (recipientType === 'SPECIFIC_USERS' && selectedUserIds.length > 0) {
-        payload.userIds = selectedUserIds;
+        // Ensure all IDs are strings
+        payload.userIds = selectedUserIds.map((id) => String(id));
       }
 
       if (recipientType === 'INACTIVE_USERS') {
@@ -378,13 +397,31 @@ export default function BroadcastsPage() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
+  const handleRetryFailed = async (broadcastId: string, failedCount: number) => {
+    setRetrying(broadcastId);
+    try {
+      const response = await apiClient.post<{ id: string; totalRecipients: number }>(
+        `/broadcast/${broadcastId}/retry-failed`
+      );
+      setSendingBroadcastId(response.data?.id || null);
+      toast.success(`Retrying ${failedCount} failed recipient${failedCount !== 1 ? 's' : ''}...`);
+      await fetchBroadcasts();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to retry broadcast');
+    } finally {
+      setRetrying(null);
+    }
+  };
+
+  const toggleFailuresExpanded = (broadcastId: string) => {
+    setExpandedFailures((prev) => {
+      const next = new Set(prev);
+      if (next.has(broadcastId)) {
+        next.delete(broadcastId);
+      } else {
+        next.add(broadcastId);
+      }
+      return next;
     });
   };
 
@@ -455,12 +492,11 @@ export default function BroadcastsPage() {
               <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-2">
                 Message *
               </label>
-              <textarea
+              <MarkdownEditor
                 value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="input"
-                rows={6}
-                placeholder="Enter your message here. HTML is supported."
+                onChange={setMessage}
+                placeholder="Enter your message here. Markdown is supported."
+                rows={8}
                 required
               />
             </div>
@@ -537,27 +573,30 @@ export default function BroadcastsPage() {
                     padding: '0.5rem',
                   }}
                 >
-                  {users.map((user) => (
-                    <label
-                      key={user._id || user.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        padding: '0.5rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedUserIds.includes(user._id || user.id || '')}
-                        onChange={() => toggleUserSelection(user._id || user.id || '')}
-                        style={{ marginRight: '0.5rem' }}
-                      />
-                      <span>
-                        {user.name} ({user.email})
-                      </span>
-                    </label>
-                  ))}
+                  {users.map((user) => {
+                    const userId = getUserId(user);
+                    return (
+                      <label
+                        key={userId}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.5rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedUserIds.includes(userId)}
+                          onChange={() => toggleUserSelection(userId)}
+                          style={{ marginRight: '0.5rem' }}
+                        />
+                        <span>
+                          {user.name} ({user.email})
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
                 {selectedUserIds.length > 0 && (
                   <small style={{ color: '#9e9e9e', display: 'block', marginTop: '0.5rem' }}>
@@ -754,11 +793,19 @@ export default function BroadcastsPage() {
                             ) : (
                               <span>Sent: {broadcast.sentCount} recipients</span>
                             )}
+                            {broadcast.completed && !!broadcast.failedCount && (
+                              <>
+                                <span>•</span>
+                                <span className="text-amber-400">
+                                  {broadcast.failedCount} failed
+                                </span>
+                              </>
+                            )}
                             <span>•</span>
                             <span>
                               {broadcast.sentAt
-                                ? formatDate(broadcast.sentAt)
-                                : formatDate(broadcast.createdAt)}
+                                ? formatDateTime(broadcast.sentAt)
+                                : formatDateTime(broadcast.createdAt)}
                             </span>
                             {broadcast.completed && (
                               <>
@@ -790,15 +837,60 @@ export default function BroadcastsPage() {
                                 </div>
                               </div>
                             )}
+                          {broadcast.completed &&
+                            !!broadcast.failedCount &&
+                            broadcast.failedRecipients?.length && (
+                              <div className="mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFailuresExpanded(broadcast._id)}
+                                  className="text-xs text-amber-400 hover:text-amber-300 transition-colors"
+                                >
+                                  {expandedFailures.has(broadcast._id)
+                                    ? 'Hide failures'
+                                    : `Show ${broadcast.failedCount} failure${broadcast.failedCount !== 1 ? 's' : ''}`}
+                                </button>
+                                {expandedFailures.has(broadcast._id) && (
+                                  <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                                    {broadcast.failedRecipients.map((f) => (
+                                      <div key={f.email} className="flex items-start gap-2 text-xs">
+                                        <span className="text-zinc-300 shrink-0">{f.email}</span>
+                                        {f.reason && (
+                                          <span className="text-zinc-600 truncate" title={f.reason}>
+                                            — {f.reason}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                         </div>
-                        <button
-                          onClick={() => openRetriggerModal(broadcast)}
-                          disabled={retriggering === broadcast._id || !broadcast.completed}
-                          className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                          type="button"
-                        >
-                          Retrigger
-                        </button>
+                        <div className="flex flex-col gap-2 shrink-0">
+                          <button
+                            onClick={() => openRetriggerModal(broadcast)}
+                            disabled={retriggering === broadcast._id || !broadcast.completed}
+                            className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                            type="button"
+                          >
+                            Retrigger
+                          </button>
+                          {broadcast.completed && !!broadcast.failedCount && (
+                            <button
+                              onClick={() =>
+                                handleRetryFailed(broadcast._id, broadcast.failedCount!)
+                              }
+                              disabled={retrying === broadcast._id}
+                              className="text-xs px-3 py-1.5 border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                              type="button"
+                            >
+                              {retrying === broadcast._id
+                                ? 'Retrying...'
+                                : `Retry ${broadcast.failedCount} failed`}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -855,12 +947,11 @@ export default function BroadcastsPage() {
                   <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-2">
                     Message *
                   </label>
-                  <textarea
+                  <MarkdownEditor
                     value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    className="input"
-                    rows={6}
-                    placeholder="Enter your message here. HTML is supported."
+                    onChange={setMessage}
+                    placeholder="Enter your message here. Markdown is supported."
+                    rows={8}
                     required
                   />
                 </div>
@@ -948,27 +1039,30 @@ export default function BroadcastsPage() {
                         padding: '0.5rem',
                       }}
                     >
-                      {users.map((user) => (
-                        <label
-                          key={user._id || user.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            padding: '0.5rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedUserIds.includes(user._id || user.id || '')}
-                            onChange={() => toggleUserSelection(user._id || user.id || '')}
-                            style={{ marginRight: '0.5rem' }}
-                          />
-                          <span>
-                            {user.name} ({user.email})
-                          </span>
-                        </label>
-                      ))}
+                      {users.map((user) => {
+                        const userId = getUserId(user);
+                        return (
+                          <label
+                            key={userId}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              padding: '0.5rem',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedUserIds.includes(userId)}
+                              onChange={() => toggleUserSelection(userId)}
+                              style={{ marginRight: '0.5rem' }}
+                            />
+                            <span>
+                              {user.name} ({user.email})
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                     {selectedUserIds.length > 0 && (
                       <small style={{ color: '#9e9e9e', display: 'block', marginTop: '0.5rem' }}>

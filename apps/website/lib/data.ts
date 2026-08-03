@@ -296,7 +296,7 @@ export const COMPANIES = [
   { name: 'Firefox', url: 'https://www.mozilla.org/firefox/' },
   { name: 'Sourcegraph', url: 'https://sourcegraph.com/' },
   { name: 'DRATA', url: 'https://drata.com/' },
-  { name: 'UnionBank', url: 'https://www.unionbankph.com/' },
+  { name: 'WikiSuite', url: 'https://wikisuite.org/Software' },
   { name: 'Twenty', url: 'https://twenty.com/' },
   { name: 'Weaviate', url: 'https://weaviate.io/' },
   { name: 'TRUST Wallet', url: 'https://trustwallet.com/' },
@@ -306,6 +306,32 @@ export const NAV_LINKS = [
   { name: 'About', href: '#about' },
   { name: 'Communities', href: '#communities' },
   { name: 'Projects', href: '#projects' },
-  { name: 'Mentors', href: '/mentors' },
-  { name: 'Blog', href: '/blog' },
 ];
+
+// External/companion platforms in the SOS Academy ecosystem (excludes the
+// Hacker platform, which is added separately since its URL is env-driven).
+export const NAV_PLATFORM_LINKS = [
+  { name: 'Mentors', href: '/mentors' },
+  { name: 'Blog', href: 'https://blog.shinobi-open-source.academy' },
+];
+
+export const NAV_RESOURCE_LINKS = [{ name: 'Privacy Policy', href: '/privacy' }];
+
+export const ALL_NAV_LINKS = [...NAV_LINKS, ...NAV_PLATFORM_LINKS, ...NAV_RESOURCE_LINKS];
+
+export const HOME_JSON_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'EducationalOrganization',
+  name: SITE_CONFIG.fullName,
+  alternateName: SITE_CONFIG.name,
+  url: 'https://shinobi-open-source.academy',
+  logo: 'https://shinobi-open-source.academy/shinobiLogo.png',
+  description: 'Learn through practical, collaborative open-source experience.',
+  email: SITE_CONFIG.email,
+  sameAs: [
+    SITE_CONFIG.urls.github,
+    SITE_CONFIG.urls.twitter,
+    SITE_CONFIG.urls.linkedin,
+    SITE_CONFIG.urls.discord,
+  ],
+};

@@ -1,6 +1,7 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import session from 'express-session';
 import { AppModule } from './app.module';
 import { envConfig } from './common/config/env.config';
 import { SeederService } from './modules/seeder/seeder.service';
@@ -29,6 +30,21 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
+
+  const isProd = envConfig.nodeEnv === 'production';
+  app.use(
+    session({
+      secret: envConfig.session.secret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000,
+      },
+    })
+  );
 
   // Configure API prefix
   app.setGlobalPrefix('api');

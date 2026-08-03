@@ -3,8 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { formatDate } from '@sos-academy/shared';
 import { apiClient } from '../../../lib/api-client';
-import { isAuthenticated } from '../../../lib/auth';
+import { useRequireAuth } from '../../../context/AuthContext';
 import DeleteModal from '../../components/DeleteModal';
 import QuickActionsMenu from '../../components/QuickActionsMenu';
 import Sidebar from '../../components/Sidebar';
@@ -67,6 +68,7 @@ interface CommunityOption {
 }
 
 export default function MentorsPage() {
+  useRequireAuth();
   const router = useRouter();
   const [mentors, setMentors] = useState<Mentor[]>([]);
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, pages: 0 });
@@ -103,11 +105,6 @@ export default function MentorsPage() {
 
   useEffect(() => {
     if (!mounted) return;
-
-    if (!isAuthenticated()) {
-      router.replace('/login');
-      return;
-    }
 
     fetchMentors();
     fetchCommunities();
@@ -313,14 +310,6 @@ export default function MentorsPage() {
       console.error('Failed to delete mentor:', error);
       toast.error('Failed to delete mentor');
     }
-  };
-
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
   };
 
   const getStatusBadge = (status: string) => {
